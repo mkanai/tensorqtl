@@ -66,7 +66,7 @@ def calculate_cis_permutations(genotypes_t, phenotype_t, permutation_ix_t,
     else:
         ix = torch.nonzero(r2_nominal_t == r2_nominal_t.max(), as_tuple=True)[0]
         ix = ix[torch.randint(0, len(ix), [1])[0]]
-    return r_nominal_t[ix], std_ratio_t[ix], ix, r2_perm_t, genotypes_t[ix]
+    return r_nominal_t[ix], std_ratio_t[ix], ix, r2_perm_t, genotypes_t[ix], corr_t
 
 
 def calculate_association(genotype_df, phenotype_s, covariates_df=None,
@@ -717,7 +717,10 @@ def map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_
                 idof = dof - 1
             res = calculate_cis_permutations(genotypes_t, phenotype_t, permutation_ix_t,
                                              residualizer=iresidualizer, random_tiebreak=random_tiebreak)
-            r_nominal, std_ratio, var_ix, r2_perm, g = [i.cpu().numpy() for i in res]
+            r_nominal, std_ratio, var_ix, r2_perm, g, r2_all_perm = [i.cpu().numpy() for i in res]
+            tstat_all_perm = np.sqrt(r2_all_perm * dof / (1 - r2_all_perm))
+            pval_all_perm = 2*stats.t.cdf(-np.abs(tstat_all_perm), dof)
+            pval_indiv_perm = pval_all_perm[var_ix, :]
             var_ix = genotype_range[var_ix]
             variant_id = variant_df.index[var_ix]
             start_distance = variant_df['pos'].values[var_ix] - igc.phenotype_start[phenotype_id]
@@ -726,6 +729,8 @@ def map_cis(genotype_df, variant_df, phenotype_df, phenotype_pos_df, covariates_
                                        start_distance, end_distance, phenotype_id, nperm=nperm)
             if beta_approx:
                 res_s[['pval_beta', 'beta_shape1', 'beta_shape2', 'true_df', 'pval_true_df']] = calculate_beta_approx_pval(r2_perm, r_nominal*r_nominal, idof)
+            res_s['lambda_gc'] = np.median(stats.chi2.ppf(1 - pval_indiv_perm, 1)) / stats.chi2.ppf(0.5, 1)
+            res_s['lambda_gc_all'] = np.median(stats.chi2.ppf(1 - pval_all_perm, 1)) / stats.chi2.ppf(0.5, 1)
             res_df.append(res_s)
     else:  # grouped mode
         for k, (phenotypes, genotypes, genotype_range, phenotype_ids, group_id) in enumerate(igc.generate_data(verbose=verbose), 1):
